@@ -14,6 +14,19 @@ enum Copy {
     static func branch(_ name: String) -> String { text(name + "Branch") }
     /// A pace, as it follows an amount left: “62% left, on track”.
     static func pace(_ pace: Pace) -> String { text("pace" + pace.rawValue.capitalized) }
+    static func forecast(_ forecast: PaceForecast?, now: Date) -> String {
+        guard let forecast, let prediction = forecast.displayPrediction else { return text("forecastUnknown") }
+        let agreement = prediction.agreement < 0.6 ? "forecastTentative" : prediction.agreement < 1 ? "forecastModerate" : "forecastStrong"
+        var lines = [pace(prediction.pace) + " (" + text(agreement) + ")"]
+        for (kind, date) in forecast.predictionDeficits.sorted(by: { $0.value < $1.value }) {
+            lines.append(text(kind) + ": " + text("forecastShortageAt", moment(date, now: now)))
+        }
+        if let points = forecast.projectedDemand["seven_day"] {
+            let amount = String(format: "%.1f", locale: locale, points / 100)
+            lines.append(text("forecastWeeklyUse", amount) + " · " + text("forecastThrough", moment(forecast.horizon, now: now)))
+        }
+        return lines.joined(separator: "\n")
+    }
     static let en = [
         "moreInfo": "More information", "project": "Project on GitHub ↗",
         "forecastHelp": "Colours forecast enabled accounts together, using the last 24 comparable hours, recent bursts and both session and weekly renewals. Weekdays and weekends are modelled separately. Muted colours mean less scenario agreement; grey means no supported estimate. A new forecast needs at least six observed hours; learning continues in the background.",
@@ -37,6 +50,8 @@ enum Copy {
         "forecastUncertainty": "Forecast uncertain",
         "forecastHint": "Colour shows the central forecast. Muted colours mean less agreement across demand scenarios; stronger colours mean more agreement. This is not a probability of accuracy. Grey means no supported estimate yet.",
         "forecastTentative": "tentative forecast", "forecastModerate": "mixed scenario agreement", "forecastStrong": "strong scenario agreement",
+        "forecastShortageAt": "possible shortage %@", "forecastWeeklyUse": "Projected use: %@ weekly plan allowances",
+        "forecastThrough": "through %@",
         "paceOver": "global quota shortage predicted", "paceSteady": "on track", "paceUnder": "ample global headroom",
         "accountEnabled": "Use this account", "accountToggleHint": "Allow this account to handle new requests.",
         "accountUpdateFailed": "The change could not be confirmed. Refresh to check the current state.",
@@ -111,6 +126,8 @@ enum Copy {
         "forecastUncertainty": "Prévision incertaine",
         "forecastHint": "La couleur indique la prévision centrale. Une couleur pâle signifie moins d’accord entre les scénarios ; une couleur vive, davantage d’accord. Ce n’est pas une probabilité d’exactitude. Gris : pas encore d’estimation étayée.",
         "forecastTentative": "prévision provisoire", "forecastModerate": "accord partiel des scénarios", "forecastStrong": "accord fort des scénarios",
+        "forecastShortageAt": "manque possible le %@", "forecastWeeklyUse": "Consommation prévue : %@ quotas hebdomadaires",
+        "forecastThrough": "jusqu’au %@",
         "paceOver": "manque de quota global prévu", "paceSteady": "dans le rythme", "paceUnder": "marge globale importante",
         "accountEnabled": "Utiliser ce compte", "accountToggleHint": "Autoriser de nouvelles requêtes sur ce compte.",
         "accountUpdateFailed": "La modification n’a pas pu être confirmée. Actualise pour vérifier l’état actuel.",

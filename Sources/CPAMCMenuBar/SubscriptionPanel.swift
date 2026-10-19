@@ -136,6 +136,7 @@ struct SubscriptionPanel: View {
                             if !accounts.isEmpty {
                                 ProviderHeader(provider: provider, disabledCount: accounts.filter(\.disabled).count,
                                                hidesDisabled: hidesDisabled(provider))
+                                    .help(Copy.forecast(store.currentForecasts[provider], now: store.now))
                                 ForEach(shown(accounts)) { account in accountRow(account) }
                                 if provider == .codex { separator }
                             }

@@ -30,10 +30,12 @@ b_k = \frac{\sum_i \Delta t_i 2^{-A_i/6}r_k(t_i)}{\sum_i \Delta t_i2^{-A_i/6}}.
 
 A fast estimate \(f_k\) uses the last two actual hours and a **30-minute** half-life. The local-hour profile uses up to 21 days, separating weekdays and weekends, normalized so older absolute activity does not replace the recent baseline. Sparse hourly estimates shrink toward that baseline; two observed hours of that local hour/day type give the profile full weight.
 
+Before applying that profile to future hours, divide the baseline by the recency-weighted mean profile scale over the same observed intervals. This gives a daily amplitude \(a_k\) without counting the busy part of a workday twice. The expected recent rate \(e_k\) applies that amplitude and profile to the actual intervals used by the fast estimate. A normal afternoon therefore does not also become a burst.
+
 For \(h\) hours into the future, the central prediction is:
 
 \[
-\hat r_k(h)=\max\{0,\; b_k s_k(\text{local hour, day type})+(f_k-b_k)2^{-h/6}\}.
+\hat r_k(h)=\max\{0,\; a_k s_k(\text{local hour, day type})+(f_k-e_k)2^{-h/6}\}.
 \]
 
 The burst adjustment applies only to the same day type. A sudden acceleration therefore influences the rest of today, without persisting through the entire week or automatically overruling an observed quiet weekend. Activity need not follow fixed office hours. Intervals are assigned to calendar periods by their midpoint, so Sunday’s final quiet interval is not mislabelled as Monday activity.
@@ -44,9 +46,9 @@ A fully observed, repeatedly inactive weekend may borrow the latest weekday ampl
 
 Hourly blocks prevent frequent polling from masquerading as independent evidence. The symmetric uncertainty scale is the largest of:
 
-- 25% of the baseline;
+- 25% of the daily amplitude;
 - half the observed hourly 90th–10th percentile rate spread;
-- 25% of the fast/baseline disagreement.
+- 25% of the fast/profile-expected disagreement.
 
 The scale widens by \(1+0.1\sqrt{h/24}\) with forecast distance. Lower demand is clamped at zero. An unobserved change of day type has a zero lower bound and an upper bound covering continued current work.
 
@@ -80,7 +82,7 @@ U_k(t)=\sum_a q_{a,k}(0)+100\sum_a N_{a,k}(t).
 
 Define pressure as the maximum cumulative demand divided by optimistic cumulative capacity, checked along the timeline, including immediately before renewal events.
 
-The icon no longer hides every uncertain forecast behind grey. Its **hue** uses the middle sensitivity scenario: halfway between the lower and upper demand rates at each simulated time. This is a tentative estimate, not a promise that the whole band agrees.
+The icon no longer hides every uncertain forecast behind grey. Its **hue** uses the central demand estimate. The five sensitivity scenarios interpolate from the lower bound to that estimate, then from that estimate to the upper bound. Clipping a negative lower tail at zero, or bracketing an unseen day type, must not move the center upward. This is a tentative estimate, not a promise that the whole band agrees.
 
 | Colour | Requirement in the displayed scenario |
 | --- | --- |
@@ -90,9 +92,9 @@ The icon no longer hides every uncertain forecast behind grey. Its **hue** uses 
 | **Grey / neutral** | Missing evidence, unknown comparable capacities, ambiguous availability, or an unclassified central scenario. |
 | **Red** | Actual measured exhaustion only; not a forecast. |
 
-**Saturation** shows scenario agreement. Evaluate five equally spaced demand levels across the sensitivity envelope (0, 0.25, 0.5, 0.75, 1), using both allocation policies at each level. The agreement score is the fraction classified in the same colour as the central scenario; unclassified scenarios do not count as agreement. Apply a saturation multiplier of `0.2 + 0.8 × agreement`, preserving hue, brightness and opacity. The tooltip describes tentative, mixed or strong agreement without claiming an accuracy percentage. This is an uncalibrated sensitivity score, **not** a probability that the prediction is right. Fully observed exhaustion stays fully red; unsupported or partial readings stay grey.
+**Saturation** shows scenario agreement. Evaluate five sensitivity levels (0, 0.25, 0.5, 0.75, 1), with 0.5 anchored at central demand and each side interpolated separately, using both allocation policies at each level. The agreement score is the fraction classified in the same colour as the central scenario; unclassified scenarios do not count as agreement. Apply a saturation multiplier of `0.2 + 0.8 × agreement`, preserving hue, brightness and opacity. The tooltip describes tentative, mixed or strong agreement without claiming an accuracy percentage. This is an uncalibrated sensitivity score, **not** a probability that the prediction is right. Fully observed exhaustion stays fully red; unsupported or partial readings stay grey.
 
-The diagnostic `pace` and `window_paces` fields retain the conservative whole-band decision. `prediction`, `window_predictions` and their `scenario_agreement` values describe the displayed estimate, even when `neutral_reason` is `uncertainty` for the whole band. Missing evidence still produces no prediction; six observed hours plus 1.5 recent hours remain required. If a conservative whole-band decision exists but the central routing heuristic cannot classify the scenario, that supported decision is retained.
+The diagnostic `pace` and `window_paces` fields retain the conservative whole-band decision. `prediction`, `window_predictions` and their `scenario_agreement` values describe the displayed estimate, even when `neutral_reason` is `uncertainty` for the whole band. Missing evidence still produces no prediction; six observed hours plus 1.5 recent hours remain required. `projected_points` reports central demand over the horizon, in percentage points of one plan, and `prediction_deficits` reports when that scenario exceeds each optimistic supply envelope. These are separate from `shortage_at`, which requires a deficit even at the lower bound. Hovering a provider heading shows its central forecast, any deficit date and projected weekly-plan use. If a conservative whole-band decision exists but the central routing heuristic cannot classify the scenario, that supported decision is retained.
 
 In OpenAI + Claude mode, provider bar **height** shows pooled weekly capacity only: sum of weekly percentages remaining divided by the number of contributing enabled licences. Session limits do not reduce the fill. Provider bar **colours** still use the joint session/weekly forecast. Session/weekly icon bars use the corresponding joint-model constraint result; they never use spare Claude capacity to excuse a Codex bottleneck. All represented providers need a supported prediction before the combined bar takes a forecast colour. The combined saturation uses the weakest contributing agreement. Partial readings always remain neutral. Individual accounts remain measured levels only, with no invented pacing.
 

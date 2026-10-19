@@ -82,6 +82,7 @@ final class PaceTests: XCTestCase {
         XCTAssertEqual(result.pace, .over)
         XCTAssertNotNil(result.shortageAt)
         XCTAssertEqual(result.prediction, .init(pace: .over, agreement: 1))
+        XCTAssertNotNil(result.predictionDeficits["seven_day"])
         XCTAssertLessThan(result.shortageAt!, now.addingTimeInterval(48 * hour))
     }
     func testBoundaryCrossingAbstainsInsteadOfFallingBackToLevel() {
@@ -284,6 +285,35 @@ final class PaceTests: XCTestCase {
         XCTAssertGreaterThan(result.observedHours, 20)
         XCTAssertEqual(result.baselineDemand["seven_day"]!, 0.5, accuracy: 0.001)
         XCTAssertEqual(result.recentDemand["seven_day"]!, 0.5, accuracy: 0.001)
+    }
+    func testUncertaintyDoesNotInventCentralDemandDuringLearnedQuietHours() {
+        let end = ISO8601DateFormatter().date(from: "2026-10-19T18:00:00Z")!
+        var f = scheduledFixture(ending: end) { date in
+            let h = self.calendar.component(.hour, from: date)
+            return (8..<18).contains(h) ? 2 : 0
+        }
+        // Twenty points per day, thirty left until tomorrow evening. Wide sensitivity
+        // bounds may warn, but their clipped lower tail must not shift the forecast up.
+        f.0.accounts[0].windows[0].usedPercent = 70
+        f.0.accounts[0].windows[0].resetsAt = end.addingTimeInterval(24 * hour)
+        let result = forecast(f, at: end)
+        XCTAssertEqual(result.prediction?.pace, .steady)
+        XCTAssertEqual(result.projectedDemand["seven_day"] ?? -1, 20, accuracy: 0.05)
+        XCTAssertNil(result.shortageAt)
+        XCTAssertTrue(result.predictionDeficits.isEmpty)
+    }
+    func testRegularWorkdayIsNotCountedAgainAsAnAfternoonBurst() {
+        for clockHour in [6, 12, 18] {
+            let end = calendar.startOfDay(for: now).addingTimeInterval(Double(clockHour) * hour)
+            var f = scheduledFixture(ending: end) { date in
+                (8..<18).contains(self.calendar.component(.hour, from: date)) ? 2 : 0
+            }
+            f.0.accounts[0].windows[0].usedPercent = 70
+            f.0.accounts[0].windows[0].resetsAt = end.addingTimeInterval(24 * hour)
+            let result = forecast(f, at: end)
+            XCTAssertEqual(result.projectedDemand["seven_day"] ?? -1, 20, accuracy: 0.05, "Forecast hour: \(clockHour)")
+            XCTAssertEqual(result.prediction?.pace, .steady)
+        }
     }
     func testLearnedInactiveWeekendCanForecastWithoutAssumingWeekdayDemand() {
         let saturday = ISO8601DateFormatter().date(from: "2026-10-17T18:00:00Z")!
