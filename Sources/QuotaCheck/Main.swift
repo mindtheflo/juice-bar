@@ -23,6 +23,10 @@ enum QuotaCheck {
                         "window_paces": .object(estimate.windowPaces.mapValues { .string($0.rawValue) }),
                         "baseline_points_per_hour": .object(estimate.baselineDemand.mapValues { .number($0) }),
                         "recent_points_per_hour": .object(estimate.recentDemand.mapValues { .number($0) }),
+                        "projected_points": .object(estimate.projectedDemand.mapValues { .number($0) }),
+                        "prediction_deficits": .object(estimate.predictionDeficits.mapValues {
+                            .string(ISO8601DateFormatter().string(from: $0))
+                        }),
                         "pressure_low": estimate.pressureRange.map { .number($0.lowerBound) } ?? .null,
                         "pressure_high": estimate.pressureRange.map { .number($0.upperBound) } ?? .null,
                         "horizon": .string(ISO8601DateFormatter().string(from: estimate.horizon)),

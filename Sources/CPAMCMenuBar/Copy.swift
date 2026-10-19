@@ -14,7 +14,78 @@ enum Copy {
     static func branch(_ name: String) -> String { text(name + "Branch") }
     /// A pace, as it follows an amount left: “62% left, on track”.
     static func pace(_ pace: Pace) -> String { text("pace" + pace.rawValue.capitalized) }
+    static func menuBarForecast(snapshot: QuotaSnapshot?, forecasts: [Provider: PaceForecast], now: Date) -> String {
+        let accounts = snapshot?.accounts.filter { !$0.disabled } ?? []
+        guard !accounts.isEmpty else { return text("tooltipLearning") }
+        let providers = Set(accounts.map(\.provider))
+        if let exhausted = providers.sorted(by: { $0.rawValue < $1.rawValue }).first(where: { provider in
+            accounts.filter { $0.provider == provider }.allSatisfy { $0.freshLeft(at: now) == 0 }
+        }) { return String(format: text("tooltipExhausted"), exhausted.title) }
+        // A reported renewal is not proof of recovery: the account's other limit may
+        // still prevent service. Name it as an event, never as the end of the gap.
+        var gaps: [(provider: Provider, kind: String, date: Date)] = []
+        for (provider, forecast) in forecasts {
+            for (kind, date) in forecast.predictionDeficits { gaps.append((provider, kind, date)) }
+        }
+        gaps.sort { a, b in
+            if a.date != b.date { return a.date < b.date }
+            return a.provider.rawValue + a.kind < b.provider.rawValue + b.kind
+        }
+        if let gap = gaps.first {
+            let kind = text(gap.kind == "seven_day" ? "tooltipWeekly" : "tooltipSession")
+            let prefix = String(format: text("tooltipGap"), kind, gap.provider.title)
+            let renewal = accounts.filter { $0.provider == gap.provider }.flatMap(\.windows)
+                .filter { !$0.modelScoped && $0.id == gap.kind }
+                .compactMap(\.resetsAt).filter { $0 > gap.date }.min()
+            let f = DateFormatter(); f.locale = locale; f.dateFormat = "EEEE"
+            guard let renewal else { return prefix + String(format: text("tooltipFrom"), f.string(from: gap.date)) }
+            let calendar = Calendar.current
+            if !calendar.isDate(gap.date, inSameDayAs: renewal),
+               calendar.component(.weekday, from: gap.date) == calendar.component(.weekday, from: renewal) {
+                f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
+            }
+            return prefix + String(format: text("tooltipNextRenewal"), f.string(from: gap.date), kind, f.string(from: renewal))
+        }
+        guard providers.allSatisfy({ forecasts[$0]?.displayPrediction != nil }) else { return text("tooltipLearning") }
+        return text("tooltipOnTrack")
+    }
+    /// Preserve the measured equivalent of both visible bars, independently of hover copy.
+    static func iconAccessibility(_ metrics: [IconMetric], content: IconContent) -> String {
+        metrics.map { metric in
+            var value = percent(metric.leftPercent)
+            if metric.isPartial {
+                if metric.leftPercent != nil { value = "≥" + value }
+                value += " (" + text(metric.missing == 1 ? "notReportedOne" : "notReportedMany", "\(metric.missing)") + ")"
+            }
+            let label = text(metric.label) + (content == .providers ? " (" + text("weekly") + ")" : "")
+            var description = label + ": " + value
+            if metric.tone != .out {
+                if metric.tone != .unknown, let prediction = metric.pace {
+                    let agreement = metric.agreement < 0.6 ? "forecastTentative" : metric.agreement < 1 ? "forecastModerate" : "forecastStrong"
+                    description += ", " + pace(prediction) + " (" + text(agreement) + ")"
+                } else { description += ", " + text("forecastUnknown") }
+            }
+            return description
+        }.joined(separator: " · ")
+    }
+    static func forecast(_ forecast: PaceForecast?, now: Date) -> String {
+        guard let forecast, let prediction = forecast.displayPrediction else { return text("forecastUnknown") }
+        let agreement = prediction.agreement < 0.6 ? "forecastTentative" : prediction.agreement < 1 ? "forecastModerate" : "forecastStrong"
+        var lines = [pace(prediction.pace) + " (" + text(agreement) + ")"]
+        for (kind, date) in forecast.predictionDeficits.sorted(by: { $0.value < $1.value }) {
+            lines.append(text(kind) + ": " + text("forecastShortageAt", moment(date, now: now)))
+        }
+        if let points = forecast.projectedDemand["seven_day"] {
+            let amount = String(format: "%.1f", locale: locale, points / 100)
+            lines.append(text("forecastWeeklyUse", amount) + " · " + text("forecastThrough", moment(forecast.horizon, now: now)))
+        }
+        return lines.joined(separator: "\n")
+    }
     static let en = [
+        "tooltipGap": "Potential %@-quota gap on %@", "tooltipWeekly": "weekly", "tooltipSession": "session",
+        "tooltipNextRenewal": " from %@; next %@ renewal %@.", "tooltipFrom": " from %@.",
+        "tooltipExhausted": "%@ quota is currently exhausted.", "tooltipLearning": "Quota forecast is not available yet.",
+        "tooltipOnTrack": "No quota gap predicted at the current pace.", "tooltipOffline": "Quota forecast is unavailable while the proxy is offline.",
         "moreInfo": "More information", "project": "Project on GitHub ↗",
         "forecastHelp": "Colours forecast enabled accounts together, using the last 24 comparable hours, recent bursts and both session and weekly renewals. Weekdays and weekends are modelled separately. Muted colours mean less scenario agreement; grey means no supported estimate. A new forecast needs at least six observed hours; learning continues in the background.",
         "accountDetails": "Account details",
@@ -37,6 +108,8 @@ enum Copy {
         "forecastUncertainty": "Forecast uncertain",
         "forecastHint": "Colour shows the central forecast. Muted colours mean less agreement across demand scenarios; stronger colours mean more agreement. This is not a probability of accuracy. Grey means no supported estimate yet.",
         "forecastTentative": "tentative forecast", "forecastModerate": "mixed scenario agreement", "forecastStrong": "strong scenario agreement",
+        "forecastShortageAt": "possible shortage %@", "forecastWeeklyUse": "Projected use: %@ weekly plan allowances",
+        "forecastThrough": "through %@",
         "paceOver": "global quota shortage predicted", "paceSteady": "on track", "paceUnder": "ample global headroom",
         "accountEnabled": "Use this account", "accountToggleHint": "Allow this account to handle new requests.",
         "accountUpdateFailed": "The change could not be confirmed. Refresh to check the current state.",
@@ -89,6 +162,10 @@ enum Copy {
         "version": "Version", "lastCheckedAt": "Checked", "updateMenu": "Install update", "restartMenu": "Restart to update",
     ]
     static let fr = [
+        "tooltipGap": "Manque potentiel de quota %@ sur %@", "tooltipWeekly": "hebdomadaire", "tooltipSession": "de session",
+        "tooltipNextRenewal": " à partir de %@ ; prochain renouvellement %@ %@.", "tooltipFrom": " à partir de %@.",
+        "tooltipExhausted": "Le quota %@ est actuellement épuisé.", "tooltipLearning": "La prévision de quota n’est pas encore disponible.",
+        "tooltipOnTrack": "Aucun manque de quota prévu au rythme actuel.", "tooltipOffline": "La prévision de quota est indisponible quand le proxy est hors ligne.",
         "moreInfo": "Plus d’informations", "project": "Projet sur GitHub ↗",
         "forecastHelp": "Les couleurs prévoient tous les comptes activés, avec les dernières 24 heures comparables, les accélérations et les renouvellements de session et de semaine. Jours ouvrés et week-ends sont modélisés séparément. Couleur pâle : accord limité entre scénarios. Gris : pas d’estimation étayée. Il faut au moins six heures observées au départ ; l’apprentissage continue en arrière-plan.",
         "accountDetails": "Détails du compte",
@@ -111,6 +188,8 @@ enum Copy {
         "forecastUncertainty": "Prévision incertaine",
         "forecastHint": "La couleur indique la prévision centrale. Une couleur pâle signifie moins d’accord entre les scénarios ; une couleur vive, davantage d’accord. Ce n’est pas une probabilité d’exactitude. Gris : pas encore d’estimation étayée.",
         "forecastTentative": "prévision provisoire", "forecastModerate": "accord partiel des scénarios", "forecastStrong": "accord fort des scénarios",
+        "forecastShortageAt": "manque possible le %@", "forecastWeeklyUse": "Consommation prévue : %@ quotas hebdomadaires",
+        "forecastThrough": "jusqu’au %@",
         "paceOver": "manque de quota global prévu", "paceSteady": "dans le rythme", "paceUnder": "marge globale importante",
         "accountEnabled": "Utiliser ce compte", "accountToggleHint": "Autoriser de nouvelles requêtes sur ce compte.",
         "accountUpdateFailed": "La modification n’a pas pu être confirmée. Actualise pour vérifier l’état actuel.",

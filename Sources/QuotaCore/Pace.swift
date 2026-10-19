@@ -95,6 +95,9 @@ public struct PaceForecast: Sendable {
     public let recentDemand: [String: Double]
     public internal(set) var prediction: PacePrediction? = nil
     public internal(set) var windowPredictions: [String: PacePrediction] = [:]
+    /// Deficits in the displayed central scenario, separate from whole-band shortageAt.
+    public internal(set) var predictionDeficits: [String: Date] = [:]
+    public internal(set) var projectedDemand: [String: Double] = [:]
     public var displayPrediction: PacePrediction? { prediction ?? pace.map { .init(pace: $0, agreement: 1) } }
     public func displayPrediction(for kind: String) -> PacePrediction? {
         windowPredictions[kind] ?? windowPaces[kind].map { .init(pace: $0, agreement: 1) }
@@ -116,14 +119,27 @@ public enum PaceForecaster {
         var hours: Double { end.timeIntervalSince(start) / 3600 }
         var midpoint: Date { start.addingTimeInterval(end.timeIntervalSince(start) / 2) }
     }
-    private struct Demand {
-        let base: [String: Double]
-        let fast: [String: Double]
-        let spread: [String: Double]
+    private struct Profile {
         let seasonal: [Int: [String: Double]]
         let exposure: [Int: Double]
         let reference: [String: Double]
         let calendar: Calendar
+
+        func scale(kind: String, at date: Date) -> Double {
+            let key = calendar.component(.hour, from: date) + (calendar.isDateInWeekend(date) ? 24 : 0)
+            let reference = reference[kind] ?? 0
+            let shape = reference > 0 ? (seasonal[key]?[kind] ?? reference) / reference : 1
+            let trust = min(1, (exposure[key] ?? 0) / 2)
+            return 1 - trust + shape * trust
+        }
+    }
+    private struct Demand {
+        let base: [String: Double]
+        let fast: [String: Double]
+        let expectedFast: [String: Double]
+        let spread: [String: Double]
+        let profile: Profile
+        var calendar: Calendar { profile.calendar }
         let now: Date
 
         func rates(at date: Date, scenario: Double) -> [String: Double] {
@@ -132,27 +148,27 @@ public enum PaceForecaster {
             let weekend = calendar.isDateInWeekend(date)
             let localHour = calendar.component(.hour, from: date)
             let key = localHour + (weekend ? 24 : 0)
-            let exposure = exposure[key] ?? 0
+            let exposure = profile.exposure[key] ?? 0
             let currentWeekend = calendar.isDateInWeekend(now)
             return base.reduce(into: [String: Double]()) { result, entry in
                 let (kind, baseline) = entry
                 // The hourly curve is learned, not a hard-coded work schedule. Shrink sparse hours to baseline.
-                let shape = (reference[kind] ?? 0) > 0 ? (seasonal[key]?[kind] ?? reference[kind]!) / reference[kind]! : 1
-                let seasonal = baseline * shape
-                let trust = min(1, exposure / 2)
-                let level = baseline * (1 - trust) + seasonal * trust
+                let level = baseline * profile.scale(kind: kind, at: date)
                 let recent = fast[kind] ?? baseline
-                let burst = (recent - baseline) * burstWeight
+                // A normal busy afternoon is already represented by the hourly profile.
+                // Only activity beyond that hour's expected level is a burst.
+                let burst = (recent - (expectedFast[kind] ?? baseline)) * burstWeight
                 // A weekday burst must not be extrapolated through an observed inactive weekend (or vice versa).
                 let center = max(0, level + (weekend == currentWeekend ? burst : 0))
                 let margin = max(baseline * 0.25, spread[kind] ?? 0) * (1 + 0.1 * sqrt(future / 24))
-                if weekend != currentWeekend && exposure < 2 {
-                    // No evidence for that day type: bracket silence AND continued work; do not assume weekends off.
-                    result[kind] = max(center + margin, recent + margin) * scenario
-                } else {
-                    let low = max(0, center - margin)
-                    result[kind] = low + (center + margin - low) * scenario
-                }
+                // An unseen day type brackets silence and continued work. Its uncertainty
+                // must not redefine the expected level, just like clipping a negative tail.
+                let unseenDayType = weekend != currentWeekend && exposure < 2
+                let low = unseenDayType ? 0 : max(0, center - margin)
+                let high = unseenDayType ? max(center + margin, recent + margin) : center + margin
+                result[kind] = scenario <= 0.5
+                    ? low + (center - low) * (scenario * 2)
+                    : center + (high - center) * ((scenario - 0.5) * 2)
             }
         }
     }
@@ -204,22 +220,27 @@ public enum PaceForecaster {
             samples.filter { calendar.isDateInWeekend($0.midpoint) }.reduce(0, { $0 + $1.hours }) >= 12 &&
             weekdaySamples.contains { $0.rates.values.contains { $0 > 0.01 } }
         guard hasMeasuredActivity || learnedIdleWeekend else { return .unknown(.activity, at: now, hours: hours, recentHours: recentHours) }
-        func average(_ items: [Sample], halfLife: Double, anchor: Date? = nil, calendarAdjusted: Bool = true) -> [String: Double] {
+        func average(_ items: [Sample], halfLife: Double, anchor: Date? = nil, calendarAdjusted: Bool = true,
+                     value: ((Sample, String) -> Double)? = nil) -> [String: Double] {
             var sums: [String: Double] = [:], weight = 0.0
             for sample in items {
                 let age = (calendarAdjusted ? comparableAge(from: sample.end, to: anchor ?? now, calendar: calendar)
                            : (anchor ?? now).timeIntervalSince(sample.end)) / hour
                 let w = sample.hours * exp(-log(2) * age / halfLife)
                 weight += w
-                for kind in kinds { sums[kind, default: 0] += (sample.rates[kind] ?? 0) * w }
+                for kind in kinds { sums[kind, default: 0] += (value?(sample, kind) ?? sample.rates[kind] ?? 0) * w }
             }
             return sums.mapValues { $0 / max(0.001, weight) }
         }
         var base = average(comparable, halfLife: 6)
+        var baselineSamples = comparable
+        var baselineAnchor = now
         let usingWeekdayBaseline = learnedIdleWeekend && base.values.allSatisfy { $0 < 0.001 }
         if usingWeekdayBaseline, let anchor = weekdaySamples.last?.midpoint {
             let recentWorkday = weekdaySamples.filter { comparableAge(from: $0.start, to: anchor, calendar: calendar) <= 24 * hour }
             base = average(recentWorkday, halfLife: 6, anchor: anchor)
+            baselineSamples = recentWorkday
+            baselineAnchor = anchor
         }
         let fast = average(recent, halfLife: 0.5, calendarAdjusted: false)
         // Dispersion is calculated on hourly blocks, not thousands of correlated polling points.
@@ -238,6 +259,18 @@ public enum PaceForecaster {
         }
         for key in seasonal.keys { seasonal[key] = seasonal[key]!.mapValues { $0 / exposure[key]! } }
         reference = reference.mapValues { $0 / max(0.001, referenceHours) }
+        let profile = Profile(seasonal: seasonal, exposure: exposure, reference: reference, calendar: calendar)
+        // Remove the hourly pattern from the amplitude estimate before applying it to
+        // future hours. Otherwise a daytime-heavy baseline counts the workday twice.
+        let baselineShape = average(baselineSamples, halfLife: 6, anchor: baselineAnchor) { sample, kind in
+            profile.scale(kind: kind, at: sample.midpoint)
+        }
+        let amplitude = base.reduce(into: [String: Double]()) { values, entry in
+            values[entry.key] = entry.value / max(0.001, baselineShape[entry.key] ?? 1)
+        }
+        let expectedFast = average(recent, halfLife: 0.5, calendarAdjusted: false) { sample, kind in
+            (amplitude[kind] ?? 0) * profile.scale(kind: kind, at: sample.midpoint)
+        }
         var spread: [String: Double] = [:]
         for kind in kinds {
             let rates = hourly.values.map { block in
@@ -245,17 +278,16 @@ public enum PaceForecaster {
             }.sorted()
             let lo = rates[Int(Double(rates.count - 1) * 0.1)]
             let hi = rates[Int(Double(rates.count - 1) * 0.9)]
-            spread[kind] = max((hi - lo) / 2, abs((fast[kind] ?? 0) - (base[kind] ?? 0)) * 0.25)
+            spread[kind] = max((hi - lo) / 2, abs((fast[kind] ?? 0) - (expectedFast[kind] ?? 0)) * 0.25)
         }
         guard base.values.allSatisfy({ $0 > 0.001 }) else { return .unknown(.activity, at: now, hours: hours, recentHours: recentHours) }
-        let demand = Demand(base: base, fast: fast, spread: spread, seasonal: seasonal, exposure: exposure,
-                            reference: reference, calendar: calendar, now: now)
+        let demand = Demand(base: amplitude, fast: fast, expectedFast: expectedFast, spread: spread, profile: profile, now: now)
         // Look through every current weekly renewal, at least a whole day, at most a week.
         let lastWeekly = accounts.flatMap(\.windows).filter { $0.id == "seven_day" }.map {
             $0.resetsAt ?? now.addingTimeInterval(7 * 86400)
         }.max()
         let horizon = max(now.addingTimeInterval(24 * hour), lastWeekly ?? now)
-        // Evaluate the same sensitivity envelope at five equally spaced demand levels. Check
+        // Evaluate five sensitivity levels anchored at the modeled central demand. Check
         // both routing policies; a greedy failure without a deficit certificate stays unclassified.
         let scenarios = (0...4).map { step -> (Simulation, Simulation) in
             let level = Double(step) / 4
@@ -299,6 +331,8 @@ public enum PaceForecaster {
                      pressureRange: min(low.pressure, high.pressure)...max(low.pressure, high.pressure, fair.pressure), observedHours: hours, recentObservedHours: recentHours, windowPaces: windowPaces, baselineDemand: base, recentDemand: fast)
         result.prediction = prediction()
         result.windowPredictions = kinds.reduce(into: [:]) { values, kind in values[kind] = prediction(kind: kind) }
+        result.predictionDeficits = scenarios[2].0.deficits
+        result.projectedDemand = scenarios[2].0.demand
         return result
     }
 
@@ -382,6 +416,7 @@ public enum PaceForecaster {
         var unavoidableShortage: Date?
         var pressures: [String: Double] = [:]
         var deficits: [String: Date] = [:]
+        var demand: [String: Double] = [:]
     }
 
     private static func simulate(accounts: [SubscriptionAccount], demand: Demand, now: Date, until end: Date,
@@ -471,6 +506,7 @@ public enum PaceForecaster {
             }
             time = next
         }
+        result.demand = consumed
         return result
     }
 }

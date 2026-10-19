@@ -1,30 +1,21 @@
 {
   "schema": 1,
-  "source_sha256": "0f5ac0b319465616d2283df7b35d95b783c46e8b9e001b1068c09f1604db980d",
+  "source_sha256": "5c28eb05e1701a2a613eb7167466e00635467d5cba485aeac170b4137df450c2",
   "images": {
     "overview.png": {
-      "sha256": "43be350a28ffae695aec7891616d20fe5555be33ace36b9e253eec0a64e07741",
-      "width": 3456,
-      "height": 2160
+      "sha256": "b6579e966e24f97f856221f866877d7c7a7ad7f4b540f03a3aa60d26767975cf",
+      "width": 720,
+      "height": 834
     },
     "account.png": {
-      "sha256": "d741756c0d1fed4924770147519e8e08d4c6e059a131e994e068a7659a28198f",
-      "width": 3456,
-      "height": 2160
+      "sha256": "3eaee5d8470a49ded99ebbc6bb7b4668d5d6eceb94f8be222c96206404e1a5b4",
+      "width": 720,
+      "height": 600
     },
     "settings.png": {
-      "sha256": "23a198a80ef16c822d3222ad6a8f84f09b5bef2d1d8466f530ef9085fcd9e82d",
-      "width": 3456,
-      "height": 2160
+      "sha256": "6dde13d6765d6f1e6a6353776d9b54295f1fdb3dbc663e9249d83f19b27e4532",
+      "width": 720,
+      "height": 1346
     }
-  },
-  "capture": {
-    "application": "CleanShot X",
-    "framing": "Native menu-bar UI on the user-approved desktop background",
-    "overview": "Installed app with account names hidden",
-    "account_and_settings": "Isolated native demo with fictional accounts; fixture-only popup anchor moved to the upper right",
-    "approved": "2026-10-16",
-    "demo_source_commit": "f082682",
-    "compatibility_review": "Nightly 49bfbc8 changes forecast internals, menu-icon saturation and hover help; captured demo panels have no learned forecast and their visible controls are unchanged."
   }
 }
