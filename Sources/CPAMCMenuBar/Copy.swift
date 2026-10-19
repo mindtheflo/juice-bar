@@ -14,6 +14,43 @@ enum Copy {
     static func branch(_ name: String) -> String { text(name + "Branch") }
     /// A pace, as it follows an amount left: “62% left, on track”.
     static func pace(_ pace: Pace) -> String { text("pace" + pace.rawValue.capitalized) }
+    static func menuBarForecast(snapshot: QuotaSnapshot?, forecasts: [Provider: PaceForecast], now: Date) -> String {
+        let accounts = snapshot?.accounts.filter { !$0.disabled } ?? []
+        guard !accounts.isEmpty else { return text("tooltipLearning") }
+        let providers = Set(accounts.map(\.provider))
+        if let exhausted = providers.sorted(by: { $0.rawValue < $1.rawValue }).first(where: { provider in
+            accounts.filter { $0.provider == provider }.allSatisfy { $0.freshLeft(at: now) == 0 }
+        }) { return String(format: text("tooltipExhausted"), exhausted.title) }
+        // Describe the earliest predicted deficit, using the next renewal AFTER it.
+        // Earlier renewals have already been included in the modeled supply.
+        var gaps: [(provider: Provider, kind: String, date: Date)] = []
+        for (provider, forecast) in forecasts {
+            for (kind, date) in forecast.predictionDeficits { gaps.append((provider, kind, date)) }
+        }
+        gaps.sort { a, b in
+            if a.date != b.date { return a.date < b.date }
+            return a.provider.rawValue + a.kind < b.provider.rawValue + b.kind
+        }
+        if let gap = gaps.first {
+            let kind = text(gap.kind == "seven_day" ? "tooltipWeekly" : "tooltipSession")
+            let prefix = String(format: text("tooltipGap"), kind, gap.provider.title)
+            let renewal = accounts.filter { $0.provider == gap.provider }.flatMap(\.windows)
+                .filter { !$0.modelScoped && $0.id == gap.kind }
+                .compactMap(\.resetsAt).filter { $0 > gap.date }.min()
+            let f = DateFormatter(); f.locale = locale; f.dateFormat = "EEEE"
+            guard let renewal else { return prefix + String(format: text("tooltipFrom"), f.string(from: gap.date)) }
+            let calendar = Calendar.current
+            if calendar.isDate(gap.date, inSameDayAs: renewal) {
+                return prefix + String(format: text("tooltipOn"), f.string(from: gap.date))
+            }
+            if calendar.component(.weekday, from: gap.date) == calendar.component(.weekday, from: renewal) {
+                f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
+            }
+            return prefix + String(format: text("tooltipBetween"), f.string(from: gap.date), f.string(from: renewal))
+        }
+        guard providers.allSatisfy({ forecasts[$0]?.displayPrediction != nil }) else { return text("tooltipLearning") }
+        return text("tooltipOnTrack")
+    }
     static func forecast(_ forecast: PaceForecast?, now: Date) -> String {
         guard let forecast, let prediction = forecast.displayPrediction else { return text("forecastUnknown") }
         let agreement = prediction.agreement < 0.6 ? "forecastTentative" : prediction.agreement < 1 ? "forecastModerate" : "forecastStrong"
@@ -28,6 +65,10 @@ enum Copy {
         return lines.joined(separator: "\n")
     }
     static let en = [
+        "tooltipGap": "Potential %@-quota gap on %@", "tooltipWeekly": "weekly", "tooltipSession": "session",
+        "tooltipBetween": " between %@ and %@.", "tooltipOn": " on %@.", "tooltipFrom": " from %@.",
+        "tooltipExhausted": "%@ quota is currently exhausted.", "tooltipLearning": "Quota forecast is not available yet.",
+        "tooltipOnTrack": "No quota gap predicted at the current pace.", "tooltipOffline": "Quota forecast is unavailable while the proxy is offline.",
         "moreInfo": "More information", "project": "Project on GitHub ↗",
         "forecastHelp": "Colours forecast enabled accounts together, using the last 24 comparable hours, recent bursts and both session and weekly renewals. Weekdays and weekends are modelled separately. Muted colours mean less scenario agreement; grey means no supported estimate. A new forecast needs at least six observed hours; learning continues in the background.",
         "accountDetails": "Account details",
@@ -104,6 +145,10 @@ enum Copy {
         "version": "Version", "lastCheckedAt": "Checked", "updateMenu": "Install update", "restartMenu": "Restart to update",
     ]
     static let fr = [
+        "tooltipGap": "Manque potentiel de quota %@ sur %@", "tooltipWeekly": "hebdomadaire", "tooltipSession": "de session",
+        "tooltipBetween": " entre %@ et %@.", "tooltipOn": " %@.", "tooltipFrom": " à partir de %@.",
+        "tooltipExhausted": "Le quota %@ est actuellement épuisé.", "tooltipLearning": "La prévision de quota n’est pas encore disponible.",
+        "tooltipOnTrack": "Aucun manque de quota prévu au rythme actuel.", "tooltipOffline": "La prévision de quota est indisponible quand le proxy est hors ligne.",
         "moreInfo": "Plus d’informations", "project": "Projet sur GitHub ↗",
         "forecastHelp": "Les couleurs prévoient tous les comptes activés, avec les dernières 24 heures comparables, les accélérations et les renouvellements de session et de semaine. Jours ouvrés et week-ends sont modélisés séparément. Couleur pâle : accord limité entre scénarios. Gris : pas d’estimation étayée. Il faut au moins six heures observées au départ ; l’apprentissage continue en arrière-plan.",
         "accountDetails": "Détails du compte",

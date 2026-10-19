@@ -27,19 +27,8 @@ final class QuotaStore: ObservableObject {
         }
     }
     var iconDescription: String {
-        return iconMetrics.map { metric in
-            var value = Copy.percent(metric.leftPercent)
-            if metric.isPartial {
-                // Accounts without a reading count as empty, so the total is at least this much.
-                if metric.leftPercent != nil { value = "≥" + value }
-                value += " (" + Copy.text(metric.missing == 1 ? "notReportedOne" : "notReportedMany", "\(metric.missing)") + ")"
-            }
-            let pace = metric.tone == .out ? nil : (metric.tone == .unknown ? nil : metric.pace).map {
-                ", " + Copy.pace($0) + " (" + Copy.text(metric.agreement < 0.6 ? "forecastTentative" : metric.agreement < 1 ? "forecastModerate" : "forecastStrong") + ")"
-            } ?? ", " + Copy.text("forecastUnknown")
-            let label = Copy.text(metric.label) + (iconPreferences.content == .providers ? " (" + Copy.text("weekly") + ")" : "")
-            return label + ": " + value + (pace ?? "")
-        }.joined(separator: " · ")
+        guard error == nil else { return Copy.text("tooltipOffline") }
+        return Copy.menuBarForecast(snapshot: snapshot, forecasts: currentForecasts, now: now)
     }
     let demo: Bool
     private var client: ProxyClient
