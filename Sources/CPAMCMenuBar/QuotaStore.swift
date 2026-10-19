@@ -30,6 +30,9 @@ final class QuotaStore: ObservableObject {
         guard error == nil else { return Copy.text("tooltipOffline") }
         return Copy.menuBarForecast(snapshot: snapshot, forecasts: currentForecasts, now: now)
     }
+    var iconAccessibilityDescription: String {
+        Copy.iconAccessibility(iconMetrics, content: iconPreferences.content) + " · " + iconDescription
+    }
     let demo: Bool
     private var client: ProxyClient
     private var loop: Task<Void, Never>?

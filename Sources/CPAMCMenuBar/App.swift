@@ -66,7 +66,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     private func updateIcon() {
         statusItem.button?.image = MenuIcon.image(store.iconMetrics, preferences: store.iconPreferences)
         statusItem.button?.toolTip = store.iconDescription
-        statusItem.button?.setAccessibilityLabel("Juice Bar · " + store.iconDescription)
+        statusItem.button?.setAccessibilityLabel("Juice Bar · " + store.iconAccessibilityDescription)
     }
     @objc private func togglePopover() {
         menu.toggle()

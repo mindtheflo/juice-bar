@@ -21,8 +21,8 @@ enum Copy {
         if let exhausted = providers.sorted(by: { $0.rawValue < $1.rawValue }).first(where: { provider in
             accounts.filter { $0.provider == provider }.allSatisfy { $0.freshLeft(at: now) == 0 }
         }) { return String(format: text("tooltipExhausted"), exhausted.title) }
-        // Describe the earliest predicted deficit, using the next renewal AFTER it.
-        // Earlier renewals have already been included in the modeled supply.
+        // A reported renewal is not proof of recovery: the account's other limit may
+        // still prevent service. Name it as an event, never as the end of the gap.
         var gaps: [(provider: Provider, kind: String, date: Date)] = []
         for (provider, forecast) in forecasts {
             for (kind, date) in forecast.predictionDeficits { gaps.append((provider, kind, date)) }
@@ -40,16 +40,33 @@ enum Copy {
             let f = DateFormatter(); f.locale = locale; f.dateFormat = "EEEE"
             guard let renewal else { return prefix + String(format: text("tooltipFrom"), f.string(from: gap.date)) }
             let calendar = Calendar.current
-            if calendar.isDate(gap.date, inSameDayAs: renewal) {
-                return prefix + String(format: text("tooltipOn"), f.string(from: gap.date))
-            }
-            if calendar.component(.weekday, from: gap.date) == calendar.component(.weekday, from: renewal) {
+            if !calendar.isDate(gap.date, inSameDayAs: renewal),
+               calendar.component(.weekday, from: gap.date) == calendar.component(.weekday, from: renewal) {
                 f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
             }
-            return prefix + String(format: text("tooltipBetween"), f.string(from: gap.date), f.string(from: renewal))
+            return prefix + String(format: text("tooltipNextRenewal"), f.string(from: gap.date), kind, f.string(from: renewal))
         }
         guard providers.allSatisfy({ forecasts[$0]?.displayPrediction != nil }) else { return text("tooltipLearning") }
         return text("tooltipOnTrack")
+    }
+    /// Preserve the measured equivalent of both visible bars, independently of hover copy.
+    static func iconAccessibility(_ metrics: [IconMetric], content: IconContent) -> String {
+        metrics.map { metric in
+            var value = percent(metric.leftPercent)
+            if metric.isPartial {
+                if metric.leftPercent != nil { value = "≥" + value }
+                value += " (" + text(metric.missing == 1 ? "notReportedOne" : "notReportedMany", "\(metric.missing)") + ")"
+            }
+            let label = text(metric.label) + (content == .providers ? " (" + text("weekly") + ")" : "")
+            var description = label + ": " + value
+            if metric.tone != .out {
+                if metric.tone != .unknown, let prediction = metric.pace {
+                    let agreement = metric.agreement < 0.6 ? "forecastTentative" : metric.agreement < 1 ? "forecastModerate" : "forecastStrong"
+                    description += ", " + pace(prediction) + " (" + text(agreement) + ")"
+                } else { description += ", " + text("forecastUnknown") }
+            }
+            return description
+        }.joined(separator: " · ")
     }
     static func forecast(_ forecast: PaceForecast?, now: Date) -> String {
         guard let forecast, let prediction = forecast.displayPrediction else { return text("forecastUnknown") }
@@ -66,7 +83,7 @@ enum Copy {
     }
     static let en = [
         "tooltipGap": "Potential %@-quota gap on %@", "tooltipWeekly": "weekly", "tooltipSession": "session",
-        "tooltipBetween": " between %@ and %@.", "tooltipOn": " on %@.", "tooltipFrom": " from %@.",
+        "tooltipNextRenewal": " from %@; next %@ renewal %@.", "tooltipFrom": " from %@.",
         "tooltipExhausted": "%@ quota is currently exhausted.", "tooltipLearning": "Quota forecast is not available yet.",
         "tooltipOnTrack": "No quota gap predicted at the current pace.", "tooltipOffline": "Quota forecast is unavailable while the proxy is offline.",
         "moreInfo": "More information", "project": "Project on GitHub ↗",
@@ -146,7 +163,7 @@ enum Copy {
     ]
     static let fr = [
         "tooltipGap": "Manque potentiel de quota %@ sur %@", "tooltipWeekly": "hebdomadaire", "tooltipSession": "de session",
-        "tooltipBetween": " entre %@ et %@.", "tooltipOn": " %@.", "tooltipFrom": " à partir de %@.",
+        "tooltipNextRenewal": " à partir de %@ ; prochain renouvellement %@ %@.", "tooltipFrom": " à partir de %@.",
         "tooltipExhausted": "Le quota %@ est actuellement épuisé.", "tooltipLearning": "La prévision de quota n’est pas encore disponible.",
         "tooltipOnTrack": "Aucun manque de quota prévu au rythme actuel.", "tooltipOffline": "La prévision de quota est indisponible quand le proxy est hors ligne.",
         "moreInfo": "Plus d’informations", "project": "Projet sur GitHub ↗",
